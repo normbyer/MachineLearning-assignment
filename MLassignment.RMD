@@ -1,0 +1,96 @@
+---
+title: "Machine Learning assignment"
+author: "Norman Byer"
+date: "June 26, 2016"
+output: html_document
+---
+
+## Introduction 
+  This is an anlysis of excersice data orignally taken from http://groupware.les.inf.puc-rio.br/har about barbell lifts. The data was taken directly from this link training https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv. In this analysis is an attempt to classify how well a barbell lift is done based on sensor data. This will be done by training an algorithm based on a subset of the sensor data and classifications provided with it.
+
+##loading and cleaning the training data
+  First the data is loaded. Then split into two equal sets one for training and the other for testing. This proportion was selected because larger training sets would take too long to train. After the split the training set is filtered for empty columns, columns containig only missing values 6 columns were removed at this step. For the other columns the missing values are replaced with the median for that column.
+```{r}
+  require('caret')
+  set.seed(85316)
+  rawdata<-read.csv('pml-training.csv',na.strings = c("#DIV/0!","","NA"))
+  inTrain<-createDataPartition(rawdata$X, list = F, p=.5) #splits data in half for training and test sets
+  training <- rawdata[inTrain,]
+  testing <- rawdata[-inTrain,]
+  train.imputed = training['classe']
+  medians = c() # means of each testing column are stored for imputing the testing data
+  for(i in colnames(training)){#this loop filters out fully na columns and replaces NAs with the column mean in the others
+    if(i=='X' || i== 'classe' || i == 'raw_timestamp_part_1' || i == 'raw_timestamp_part_2'){
+    }else if(class(training[[i]])=='factor'){
+      train.imputed = cbind(train.imputed,training[i]) #any factors may be added directly
+    }else{
+      if(sum(is.na(training[i]))!=length(training[[i]])){#skips any rows that has only Na values
+        train.imputed = cbind(train.imputed,training[i])
+        
+        # mean is named and saved here for use when imputing the test data
+        median <-median(training[[i]],na.rm = TRUE) 
+        temp = c(median)
+        names(temp)<-c(i)
+        medians<-c(medians,temp)
+        
+        #NAs are replaced with the column mean
+        NAs = is.na(training[i])
+        train.imputed[i][NAs] = temp 
+      }
+    }
+  }
+```
+
+##Preprocessing
+  After the imputation the data is preprocessed using Near Zero Variance and Principle Component Analysis. This was done inorder to reduce the number of columns and focus only on the meaningful data
+```{r}
+ preproc <- preProcess(train.imputed,method = c('nzv','pca'))
+ processeddata <- predict(preproc, train.imputed)
+```
+
+##Training 
+  with the preprocessing done a random forest model is trained on the data
+```{r}
+   rf<-train(classe ~ ., data = processeddata, method='rf')
+  
+  # calculate accuracy
+  TrainPred <- predict(rf,processeddata)
+  accuracy <- sum(TrainPred == train.imputed$classe) * 100 / length(TrainPred)
+```
+ accuracy on the training data is about `r round(accuracy)`%
+ 
+##Testing 
+  the testing data is processed the same as the training data.
+```{r}
+   # filter out the same columns as from the traiing set
+  test.imputed <- testing[colnames(testing) %in% colnames(train.imputed)]
+  #impute the means from the training set into the missing values of the test set
+  for(i in colnames(test.imputed)){
+    if(class(testing[[i]])!='factor'){
+      NAs = is.na(testing[i])
+     test.imputed[i][NAs] <- medians[i]
+    }
+  }
+  #preprocess using the old nzv and pca
+  processedTestdata <- predict(preproc,test.imputed)
+```
+  finally the model is used to make a prediction on the test set and the accuracy calculated
+```{r cache=TRUE}
+  TestPred <-predict(rf,processedTestdata)
+  testaccuracy <- sum(TestPred == test.imputed$classe) * 100 / length(TestPred)
+```
+  accuracy on the test data is about `r round(testaccuracy)`%
+  
+##quiz data
+```{r}
+  quizdata<-read.csv('pml-testing.csv',na.strings = c("#DIV/0!","","NA"))
+  quiz.imputed <- quizdata[colnames(quizdata) %in% colnames(train.imputed)]
+  for(i in colnames(quiz.imputed)){
+    if(class(quizdata[[i]])!='factor'){
+      NAs = is.na(quizdata[i])
+     quiz.imputed[i][NAs] <- medians[i]
+    }
+  }
+  processedQuizdata <-predict(preproc,quiz.imputed)
+  predict(rf,processedQuizdata)
+```
